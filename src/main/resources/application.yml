@@ -1,0 +1,98 @@
+
+server:
+  port: 8088
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: default
+
+  cloud:
+    gateway:
+      #<<< API Gateway / Routes
+      routes:
+        - id: Member
+          uri: http://localhost:8083
+          predicates:
+            - Path=/members/**,
+        - id: Book
+          uri: http://localhost:8082
+          predicates:
+            - Path=/bookLists/**, /books/**,
+          filters:
+            - JwtVerifyFilter
+        - id: Chat
+          uri: http://localhost:8084
+          predicates:
+            - Path=/chats/**,
+          filters:
+            - JwtVerifyFilter
+        - id: Board
+          uri: http://localhost:8085
+          predicates:
+            - Path=/boards/**,
+          filters:
+            - JwtVerifyFilter
+        - id: mypage
+          uri: http://localhost:8086
+          predicates:
+            - Path=/mypages/**
+          filters:
+            - JwtVerifyFilter
+      #>>> API Gateway / Routes
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOriginPatterns:
+              - "*"
+            allowedMethods:
+              - "*"
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: docker
+
+  cloud:
+    gateway:
+      routes:
+        - id: Member
+          uri: http://member:8080
+          predicates:
+            - Path=/members/**,
+        - id: Book
+          uri: http://book:8080
+          predicates:
+            - Path=/bookLists/**, /books/**,
+        - id: Chat
+          uri: http://chat:8080
+          predicates:
+            - Path=/chats/**,
+        - id: Board
+          uri: http://board:8080
+          predicates:
+            - Path=/boards/**,
+        - id: mypage
+          uri: http://mypage:8080
+          predicates:
+            - Path=/mypages/**
+      globalcors:
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - "*"
+            allowedMethods:
+              - "*"
+            allowedHeaders:
+              - "*"
+            allowCredentials: true
+
+server:
+  port: 8080
