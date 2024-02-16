@@ -1,0 +1,279 @@
+**GatewayApplication.java**
+
+package com.usg.gateway;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+@SpringBootApplication
+public class GatewayApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(GatewayApplication.class, args);
+	}
+
+}
+
+
+
+**TokenVerifierPort.java**
+
+package com.usg.gateway.domain.port;
+
+public interface TokenVerifierPort {
+    boolean verifyToken(String token);
+}
+
+
+
+**ApplicationConfig.java**
+
+package com.usg.gateway.application.config;
+
+import com.usg.gateway.domain.port.TokenVerifierPort;
+import com.usg.gateway.application.service.TokenVerificationService;
+import com.usg.gateway.infrastructure.security.JwtTokenVerifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class ApplicationConfig {
+
+    @Bean
+    public TokenVerifierPort tokenVerifierPort() {
+        return new JwtTokenVerifier("secret_key");
+    }
+
+    @Bean
+    public TokenVerificationService tokenVerificationService(TokenVerifierPort tokenVerifierPort) {
+        return new TokenVerificationService(tokenVerifierPort);
+    }
+}
+
+
+
+**TokenVerificationService.java**
+
+package com.usg.gateway.application.service;
+
+import com.usg.gateway.domain.port.TokenVerifierPort;
+
+public class TokenVerificationService {
+    private final TokenVerifierPort tokenVerifierPort;
+
+    public TokenVerificationService(TokenVerifierPort tokenVerifierPort) {
+        this.tokenVerifierPort = tokenVerifierPort;
+    }
+
+    public boolean verifyToken(String token) {
+        return tokenVerifierPort.verifyToken(token);
+    }
+}
+
+
+
+**JwtTokenVerifier.java**
+
+package com.usg.gateway.infrastructure.security;
+
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.algorithms.Algorithm;
+import com.auth0.jwt.exceptions.JWTVerificationException;
+import com.auth0.jwt.interfaces.DecodedJWT;
+import com.auth0.jwt.interfaces.JWTVerifier;
+import com.usg.gateway.domain.port.TokenVerifierPort;
+
+import java.util.Date;
+
+public class JwtTokenVerifier implements TokenVerifierPort {
+    private final JWTVerifier verifier;
+
+
+    public JwtTokenVerifier(String secret) {
+        Algorithm algorithm = Algorithm.HMAC512(secret);
+        this.verifier = JWT.require(algorithm).build();
+    }
+
+    @Override
+    public boolean verifyToken(String token) {
+        try {
+            DecodedJWT jwt = verifier.verify(token);
+
+
+            Date expiresAt = jwt.getExpiresAt();
+            if (expiresAt.before(new Date())) {
+                System.out.println("토큰 만료");
+                return false;
+            }
+
+
+            String email = jwt.getClaim("email").asString();
+            if (email == null || email.isEmpty()) {
+                System.out.println("Email claim is missing");
+                return false;
+            }
+
+
+            String role = jwt.getClaim("role").asString();
+            if (!"ADMIN".equals(role)) {
+                System.out.println("관리자가 아닙니다.");
+                return false;
+            }
+
+
+            return true;
+        } catch (JWTVerificationException e) {
+
+            System.out.println("토큰검증 실패 : " + e.getMessage());
+            return false;
+        }
+    }
+
+}
+
+
+
+**JwtVerifyFilter.java**
+
+package com.usg.gateway.infrastructure.filter;
+
+import com.usg.gateway.application.service.TokenVerificationService;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ServerWebExchange;
+import org.springframework.web.server.WebFilter;
+import org.springframework.web.server.WebFilterChain;
+import reactor.core.publisher.Mono;
+
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class JwtVerifyFilter implements WebFilter {
+    private final TokenVerificationService verificationService;
+
+    public JwtVerifyFilter(TokenVerificationService verificationService) {
+        this.verificationService = verificationService;
+    }
+
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        String token = extractToken(exchange);
+        if (token == null || !verificationService.verifyToken(token)) {
+            exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+            return exchange.getResponse().setComplete();
+        }
+        return chain.filter(exchange);
+    }
+
+    private String extractToken(ServerWebExchange exchange) {
+        String authorizationHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+            return authorizationHeader.substring(7);
+        }
+        return null;
+    }
+}
+
+
+
+**GatewayApplicationTests.java**
+
+package com.usg.gateway;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+
+@SpringBootTest
+class GatewayApplicationTests {
+
+	@Test
+	void contextLoads() {
+	}
+
+}
+
+
+
+**TokenVerificationServiceTest.java**
+
+package com.usg.gateway.application.service;
+
+import com.usg.gateway.domain.port.TokenVerifierPort;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
+
+public class TokenVerificationServiceTest {
+    private TokenVerifierPort tokenVerifierPort;
+    private TokenVerificationService tokenVerificationService;
+
+    @BeforeEach
+    void setUp() {
+
+        tokenVerifierPort = Mockito.mock(TokenVerifierPort.class);
+
+        tokenVerificationService = new TokenVerificationService(tokenVerifierPort);
+    }
+
+    @Test
+    void verifyTokenShouldReturnTrueForValidToken() {
+
+        String validToken = "validToken";
+        when(tokenVerifierPort.verifyToken(validToken)).thenReturn(true);
+
+
+        assertTrue(tokenVerificationService.verifyToken(validToken), "Token should be valid");
+    }
+
+    @Test
+    void verifyTokenShouldReturnFalseForInvalidToken() {
+
+        String invalidToken = "invalidToken";
+        when(tokenVerifierPort.verifyToken(invalidToken)).thenReturn(false);
+
+
+        assertFalse(tokenVerificationService.verifyToken(invalidToken), "Token should be invalid");
+    }
+}
+
+
+
+**JwtTokenVerifierTest.java**
+
+package com.usg.gateway.infrastructure.security;
+
+public class JwtTokenVerifierTest {
+}
+
+
+
+**TEST-com.usg.gateway.application.service.TokenVerificationServiceTest.xml**
+
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.usg.gateway.application.service.TokenVerificationServiceTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2024-02-16T02:22:27" hostname="jeongeunsu-Inspiron-14-5420" time="0.901">
+  <properties/>
+  <testcase name="verifyTokenShouldReturnTrueForValidToken()" classname="com.usg.gateway.application.service.TokenVerificationServiceTest" time="0.893"/>
+  <testcase name="verifyTokenShouldReturnFalseForInvalidToken()" classname="com.usg.gateway.application.service.TokenVerificationServiceTest" time="0.004"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
+
+
+
+**gradle-wrapper.properties**
+
+distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
+
+
+
